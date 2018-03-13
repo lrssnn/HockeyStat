@@ -5,4 +5,4 @@ authors = ["Niklas Larsson <niklaslarsson95@gmail.com>"]
 
 [dependencies]
 curl = "*"
-html5ever = "*"
+serde_json = "1.0"
