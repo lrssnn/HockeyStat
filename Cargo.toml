@@ -10,3 +10,4 @@ serde_derive = "*"
 serde = "*"
 time = "*"
 chrono = { version = "*", features = ["serde"] }
+plotlib = "*"

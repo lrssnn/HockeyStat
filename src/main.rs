@@ -1,17 +1,18 @@
 extern crate curl;
 extern crate serde;
-#[macro_use] extern crate chrono;
-#[macro_use] extern crate serde_json;
+extern crate chrono;
+extern crate serde_json;
+extern crate plotlib;
 #[macro_use] extern crate serde_derive;
 
-use std::io::{stdout, Write, Read};
-use std::iter::repeat;
-use std::time::Instant;
 use curl::easy::{Easy2, Handler, WriteError};
-use chrono::prelude::*;
-use chrono::Date;
+use std::collections::HashMap;
 
-use serde_json::{Value, Error};
+use plotlib::style::Line;
+
+use std::fs::File;
+use std::io::Write;
+
 
 fn main() {
     println!("Hello, world!");
@@ -19,30 +20,96 @@ fn main() {
 
     let mut curl = Easy2::new(Collector(Vec::new()));
     curl.get(true).unwrap();
-	curl.useragent("Chrome/41.0.2227.0").unwrap();
-    curl.url("https://statsapi.web.nhl.com/api/v1/schedule?startDate=2017-12-12&endDate=2017-12-12").unwrap();
+    curl.url("https://statsapi.web.nhl.com/api/v1/schedule?startDate=2017-10-04&endDate=2018-02-12&filter=gameType,eq,'R'").unwrap();
     curl.perform().unwrap();
 
     let web = curl.get_ref();
-
     let json = String::from_utf8(web.0.as_slice().to_vec()).unwrap();
 
-	println!("{}", json);
-
     let data: Api = serde_json::from_str(&json).unwrap();
-    //let v: Value = serde_json::from_str(&json).unwrap();
 
-    println!("{}", data.copyright);
+    let mut teams = HashMap::new();
 
-/*
-    let dom = parse_document(RcDom::default(), Default::default())
-        .from_utf8()
-        .read_from(&mut web.0.as_slice())
-        .unwrap();
+    for date in data.dates {
+        println!("Date: {}", date.date);
+        for game in date.games {
+            if game.gameType != "R" { continue; }
+            println!("    {} at {}", game.teams.away.team.name, game.teams.home.team.name);
+            ingest_game(&mut teams, &game, &date.date);
+        }
+    }
 
+    let mut file = File::create("data.txt").unwrap();
+    for (team, record) in teams {
+        println!("{}: {}-{}-{}", 
+                 team, 
+                 record.data.iter().filter(|e| e == &&2).count(), 
+                 record.data.iter().filter(|e| e == &&0).count(),
+                 record.data.iter().filter(|e| e == &&1).count());
+        file.write_all(format!("{}\n", team).as_bytes());
+        for score in record.acc {
+            file.write_all(format!(",{}", score).as_bytes());
+        }
+        file.write_all(format!("\n").as_bytes());
+    }
 
-    walk(0, dom.document);
-*/
+}
+
+struct TeamRecord {
+    name: String,
+    data: Vec<usize>,
+    acc: Vec<usize>,
+    last_wins: usize,
+    last_losses: usize,
+}
+
+fn ingest_game(teams: &mut HashMap<String, TeamRecord>, game: &ApiGame, date: &String) {
+    let away_team = &game.teams.away.team.name.to_string();
+    let home_team = &game.teams.home.team.name;
+
+    if !teams.contains_key(away_team) { 
+        teams.insert(away_team.to_string(), 
+                     TeamRecord { 
+                         name: away_team.to_string(), 
+                         data: vec![],
+                         acc: vec![],
+                         last_wins: 0,
+                         last_losses: 0,
+                     });
+    }
+    if !teams.contains_key(home_team) { 
+        teams.insert(home_team.to_string(), 
+                     TeamRecord { 
+                         name: home_team.to_string(), 
+                         data: vec![],
+                         acc: vec![],
+                         last_wins: 0,
+                         last_losses: 0,
+                     });
+    }
+
+    update_team(teams, &game.teams.away, date);
+    update_team(teams, &game.teams.home, date);
+}
+
+fn update_team(teams: &mut HashMap<String, TeamRecord>, team: &ApiTeamResult, date: &String) {
+    let team_record = teams.get_mut(&team.team.name).unwrap();
+    let score;
+
+    if team_record.last_wins < team.leagueRecord.wins {
+        score = 2;
+    } else if team_record.last_losses < team.leagueRecord.losses {
+        score = 0;
+    } else {
+        score = 1;
+    }
+
+    let acc = team_record.acc.last().unwrap_or(&0) + score;
+    team_record.data.push(score);
+    team_record.acc.push(acc);
+
+    team_record.last_wins = team.leagueRecord.wins;
+    team_record.last_losses = team.leagueRecord.losses;
 }
 
 
@@ -57,6 +124,7 @@ impl Handler for Collector {
 
 // Define the api datastructure
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct Api {
     copyright: String,
     totalItems: usize,
@@ -68,6 +136,7 @@ struct Api {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiDate {
     date: String,
     totalItems: usize,
@@ -80,6 +149,7 @@ struct ApiDate {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiGame {
     gamePk: usize,
     link: String,
@@ -93,6 +163,7 @@ struct ApiGame {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiStatus {
     abstractGameState: String,
     codedGameState: String,
@@ -102,12 +173,14 @@ struct ApiStatus {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiTeams {
     away: ApiTeamResult,
     home: ApiTeamResult,
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiTeamResult {
     leagueRecord: ApiRecord,
     score: usize,
@@ -115,6 +188,7 @@ struct ApiTeamResult {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiTeam {
     id: usize,
     name: String,
@@ -122,21 +196,24 @@ struct ApiTeam {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiRecord {
     wins: usize,
     losses: usize,
-    ot: usize,
+    ot: Option<usize>,
     #[serde(rename="type")]
     _type: String,
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiVenue {
     name: String,
     link: String,
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(non_snake_case)]
 struct ApiContent {
     link: String,
 }
